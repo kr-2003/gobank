@@ -27,7 +27,7 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHTTPHandlerFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandlerFunc(s.handleGetAccountByID)))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandlerFunc(s.handleGetAccountByID), s.store))
 	router.HandleFunc("/account/delete/{id}", makeHTTPHandlerFunc(s.handleDeleteAccount))
 	router.HandleFunc("/transfer", makeHTTPHandlerFunc(s.handleTransfer))
 	log.Println("JSON API server running on port: ", s.listenAddr)
@@ -123,17 +123,31 @@ func createJWT(account *Account) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 
-func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
+func withJWTAuth(handlerFunc http.HandlerFunc, s Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Calling JWT auth middleware")
 		tokenString := r.Header.Get("x-jwt-token")
 		token, err := validateJWT(tokenString)
 		if err != nil {
-			WriteJSON(w, http.StatusForbidden, APIError{Error: "invalid token"})
+			WriteJSON(w, http.StatusForbidden, APIError{Error: "permission denied"})
+			return
+		}
+		if !token.Valid {
+			WriteJSON(w, http.StatusForbidden, APIError{Error: "permission denied"})
+			return
+		}
+		userID, err := getID(r)
+		account, err := s.GetAccountByID(userID)
+		if err != nil {
+			WriteJSON(w, http.StatusForbidden, APIError{Error: "permission denied"})
 			return
 		}
 		claims := token.Claims.(jwt.MapClaims)
-		
+		if account.Number != int64(claims["accountNumber"].(float64)) {
+			WriteJSON(w, http.StatusForbidden, APIError{Error: "permission denied"})
+			return
+		}
+		fmt.Println(claims)
 		handlerFunc(w, r)
 	}
 }
@@ -163,4 +177,13 @@ func makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 			WriteJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
 		}
 	}
+}
+
+func getID(r *http.Request) (int, error) {
+	idStr := mux.Vars(r)["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return id, fmt.Errorf("invalid id given %s", idStr)
+	}
+	return id, nil
 }
