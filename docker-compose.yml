@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  api:
+    image: justarandomnoob/gobankimage:latest
+    ports:
+      - "3000:3000"
+    stdin_open: true
+    tty: true      
+    depends_on:
+      - database
+  database:
+    image: postgres
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - data:/var/lib/postgresql/data
+
+volumes:
+  data:
